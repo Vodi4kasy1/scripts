@@ -7,10 +7,6 @@
 
 wait(4)
 
-local BuyLucky = true
-local AutoSell = true
-local Hop = false
-
 local PriorityItems = {
     "Lucky Arrow",
     "Lucky Stone Mask",
