@@ -9,7 +9,7 @@ wait(4)
 
 local BuyLucky = true
 local AutoSell = true
-local Hop = true
+local Hop = false
 
 local PriorityItems = {
     "Lucky Arrow",
@@ -338,11 +338,20 @@ while true do
             end
         end
         
-        if Hop then
-            pcall(function()
-                Teleport()
-            end)
-            task.wait(3)
+        if Hop and #getgenv().SpawnedItems == 0 then
+            local ShouldHop = true
+            if BuyLucky and not HasLuckyArrows() and Money.Value >= 50000 then
+                ShouldHop = false
+            end
+            
+            if ShouldHop then
+                pcall(function()
+                    Teleport()
+                end)
+                task.wait(3)
+            else
+                task.wait(5)
+            end
         else
             task.wait(5)
         end
@@ -350,3 +359,4 @@ while true do
         task.wait(1)
     end
 end
+--идите в пизду мне лень чёт делать так что вот апдейт хуйни на юбу и кст мать парагона жирная шлюха - heny
