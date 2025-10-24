@@ -327,7 +327,7 @@ while true do
         local Money = Player.PlayerStats.Money
         
         if BuyLucky and not HasLuckyArrows() then
-            while Money.Value >= 50000 do
+            while Money.Value >= 75000 do
                 local Character = GetCharacter()
                 if Character and Character:FindFirstChild("RemoteEvent") then
                     Character.RemoteEvent:FireServer("PurchaseShopItem", {["ItemName"] = "1x Lucky Arrow"})
