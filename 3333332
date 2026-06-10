@@ -209,6 +209,13 @@ local RecordingData = {
 
 local RecordingActive = false
 local StrategyURL = ""
+local Logger_Widget = nil
+
+local function AddLog(text)
+    if Logger_Widget then
+        Logger_Widget:Log(text)
+    end
+end
 
 local function StartRecording()
     RecordingActive = true
@@ -216,10 +223,22 @@ local function StartRecording()
         towers = {},
         actions = {}
     }
+    AddLog("[RECORDING] Started recording strategy")
 end
 
 local function StopRecording()
     RecordingActive = false
+    AddLog("[STOP] Stopped recording - Total actions: " .. #RecordingData.actions)
+    
+    local strategyCode = "local TDS = shared.TDSTable\nlocal RecordingData = " .. HttpService:JSONEncode(RecordingData) .. "\n\nif TDS.PlayRecording then\n    TDS.PlayRecording(RecordingData)\nend"
+    
+    local fileName = "Strategy_" .. os.date("%Y%m%d_%H%M%S") .. ".txt"
+    
+    if writefile then
+        writefile(fileName, "loadstring(game:HttpGet('" .. Globals.RecorderURL .. "'))(" .. strategyCode .. ")")
+        AddLog("[SAVED] Strategy saved to: " .. fileName)
+    end
+    
     return RecordingData
 end
 
@@ -545,6 +564,7 @@ function TDS:Place(TName, px, py, pz, ...)
             z = pz,
             wave = GetCurrentWave()
         })
+        AddLog("[PLACE] " .. TName .. " at wave " .. GetCurrentWave())
     end
 
     return #self.PlacedTowers
@@ -563,6 +583,7 @@ function TDS:Upgrade(idx, PId)
                 pathId = PId or 1,
                 wave = GetCurrentWave()
             })
+            AddLog("[UPGRADE] Index " .. idx .. " (Path " .. (PId or 1) .. ") at wave " .. GetCurrentWave())
         end
     end
 end
@@ -589,6 +610,7 @@ function TDS:SetTarget(idx, TargetType, ReqWave)
             targetType = TargetType,
             wave = GetCurrentWave()
         })
+        AddLog("[TARGET] Index " .. idx .. " set to " .. TargetType .. " at wave " .. GetCurrentWave())
     end
 end
 
@@ -604,6 +626,7 @@ function TDS:Sell(idx, ReqWave)
                 index = idx,
                 wave = GetCurrentWave()
             })
+            AddLog("[SELL] Index " .. idx .. " at wave " .. GetCurrentWave())
         end
         return true
     end
@@ -622,6 +645,7 @@ function TDS:Ability(idx, name, data, loop)
             data = data,
             wave = GetCurrentWave()
         })
+        AddLog("[ABILITY] " .. name .. " for index " .. idx .. " at wave " .. GetCurrentWave())
     end
 
     return DoActivateAbility(t, name, data, loop)
@@ -646,6 +670,7 @@ function TDS:SetOption(idx, name, val, ReqWave)
                 value = val,
                 wave = GetCurrentWave()
             })
+            AddLog("[OPTION] Index " .. idx .. " " .. name .. " = " .. tostring(val) .. " at wave " .. GetCurrentWave())
         end
         return true
     end
@@ -686,72 +711,20 @@ local Window = Library:Window({
     }
 })
 
-local Recorder = Window:Tab({Title = "Recorder", Icon = "record"}) do
-
-    Recorder:Section({Title = "Recording Control"})
-
-    Recorder:Button({
-        Title = "Start Recording",
-        Desc = "Begin recording your strategy",
-        Callback = function()
-            StartRecording()
-            Window:Notify({
-                Title = "Recorder",
-                Desc = "Recording started!",
-                Time = 3,
-                Type = "normal"
-            })
+local Main = Window:Tab({Title = "Main", Icon = "home"}) do
+    
+    Main:Section({Title = "Auto Features"})
+    
+    Main:Toggle({
+        Title = "Auto Skip",
+        Desc = "Skip waves as soon as possible",
+        Value = Globals.autoSkipWaves,
+        Callback = function(v)
+            SetSetting("autoSkipWaves", v)
         end
     })
 
-    Recorder:Button({
-        Title = "Stop Recording",
-        Desc = "End recording and show data",
-        Callback = function()
-            local data = StopRecording()
-            Window:Notify({
-                Title = "Recorder",
-                Desc = "Recording stopped! Actions: " .. #data.actions,
-                Time = 5,
-                Type = "normal"
-            })
-        end
-    })
-
-    Recorder:Section({Title = "Strategy Export"})
-
-    Recorder:Textbox({
-        Title = "Strategy URL",
-        Desc = "Custom URL for strategy export",
-        Placeholder = "https://raw.githubusercontent.com/...",
-        Value = Globals.RecorderURL,
-        ClearTextOnFocus = false,
-        Callback = function(text)
-            SetSetting("RecorderURL", text)
-            StrategyURL = text
-        end
-    })
-
-    Recorder:Button({
-        Title = "Copy Strategy Code",
-        Desc = "Generate loadstring for your strategy",
-        Callback = function()
-            local code = [[loadstring(game:HttpGet("]] .. Globals.RecorderURL .. [["))(TDS, RecordingData)]]
-            if setclipboard then
-                setclipboard(code)
-                Window:Notify({
-                    Title = "Recorder",
-                    Desc = "Strategy code copied!",
-                    Time = 3,
-                    Type = "normal"
-                })
-            end
-        end
-    })
-
-    Recorder:Section({Title = "Auto Settings"})
-
-    Recorder:Toggle({
+    Main:Toggle({
         Title = "Auto Retry",
         Desc = "Continue playing without rejoining",
         Value = Globals.autoRetry,
@@ -760,27 +733,9 @@ local Recorder = Window:Tab({Title = "Recorder", Icon = "record"}) do
         end
     })
 
-    Recorder:Toggle({
-        Title = "Auto Skip Waves",
-        Desc = "Automatically skip waves",
-        Value = Globals.autoSkipWaves,
-        Callback = function(v)
-            SetSetting("autoSkipWaves", v)
-        end
-    })
+    Main:Section({Title = "Settings"})
 
-    Recorder:Slider({
-        Title = "Skip Delay (seconds)",
-        Min = 1,
-        Max = 10,
-        Rounding = 0,
-        Value = Globals.autoSkipDelay,
-        Callback = function(val)
-            SetSetting("autoSkipDelay", val)
-        end
-    })
-
-    Recorder:Textbox({
+    Main:Textbox({
         Title = "Private Server Code",
         Desc = "Optional private server code",
         Placeholder = "16055572089259659857100802598629",
@@ -796,14 +751,59 @@ local Recorder = Window:Tab({Title = "Recorder", Icon = "record"}) do
             SetSetting("PrivateCode", validated)
         end
     })
-end
 
-local Logger = Window:Tab({Title = "Logger", Icon = "terminal"}) do
-    Logger = Logger:CreateLogger({
-        Title = "RECORDER LOGGER:",
-        Size = UDim2.new(0, 330, 0, 300)
+    Main:Textbox({
+        Title = "Strategy URL",
+        Desc = "Your custom URL for strategy export",
+        Placeholder = "https://raw.githubusercontent.com/...",
+        Value = Globals.RecorderURL,
+        ClearTextOnFocus = false,
+        Callback = function(text)
+            SetSetting("RecorderURL", text)
+            StrategyURL = text
+        end
     })
 end
+
+local Recorder = Window:Tab({Title = "Recorder", Icon = "record"}) do
+
+    Recorder:Section({Title = "Recording"})
+
+    Recorder:Button({
+        Title = "Record",
+        Desc = "Start recording strategy",
+        Callback = function()
+            StartRecording()
+            Window:Notify({
+                Title = "Recorder",
+                Desc = "Recording started!",
+                Time = 3,
+                Type = "normal"
+            })
+        end
+    })
+
+    Recorder:Button({
+        Title = "Stop Record",
+        Desc = "Stop recording and save",
+        Callback = function()
+            local data = StopRecording()
+            Window:Notify({
+                Title = "Recorder",
+                Desc = "Recording stopped! Actions: " .. #data.actions,
+                Time = 5,
+                Type = "normal"
+            })
+        end
+    })
+
+    Recorder:Section({Title = "Logs"})
+end
+
+Logger_Widget = Recorder:CreateLogger({
+    Title = "LOGS:",
+    Size = UDim2.new(0, 330, 0, 300)
+})
 
 local function RunVoteSkip()
     while true do
