@@ -1,1 +1,913 @@
+local Globals = getgenv()
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
 
+local RemoteFunc = ReplicatedStorage:WaitForChild("RemoteFunction")
+local RemoteEvent = ReplicatedStorage:WaitForChild("RemoteEvent")
+
+local DefaultSettings = {
+    autoRetry = true,
+    retryDelay = 2
+}
+
+local FileName = "Recorder_Config.json"
+
+local function SaveSettings()
+    local DataToSave = {}
+    for key, _ in pairs(DefaultSettings) do
+        DataToSave[key] = Globals[key]
+    end
+    writefile(FileName, HttpService:JSONEncode(DataToSave))
+end
+
+local function LoadSettings()
+    local data = {}
+    if isfile(FileName) then
+        pcall(function()
+            data = HttpService:JSONDecode(readfile(FileName))
+        end)
+    end
+    for key, DefaultVal in pairs(DefaultSettings) do
+        if Globals[key] == nil then
+            if data[key] ~= nil then
+                Globals[key] = data[key]
+            else
+                Globals[key] = DefaultVal
+            end
+        end
+    end
+    SaveSettings()
+end
+
+LoadSettings()
+
+local GameState = "LOBBY"
+
+local function IdentifyGameState()
+    local function check()
+        if PlayerGui:FindFirstChild("ReactLobbyHud") then
+            return "LOBBY"
+        elseif PlayerGui:FindFirstChild("ReactUniversalHotbar") then
+            return "GAME"
+        end
+        return nil
+    end
+    while true do
+        local state = check()
+        if state then
+            GameState = state
+        end
+        task.wait(0.5)
+    end
+end
+
+task.spawn(IdentifyGameState)
+
+local PlacedTowers = {}
+local RecordingMode = false
+local RecordedActions = {}
+
+local IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+local ScreenSize = workspace.CurrentCamera.ViewportSize
+local GuiWidth = IsMobile and math.clamp(ScreenSize.X * 0.85, 280, 380) or 400
+local GuiHeight = IsMobile and math.clamp(ScreenSize.Y * 0.65, 350, 500) or 550
+local ButtonHeight = IsMobile and 40 or 35
+local LogFontSize = IsMobile and 11 or 9
+local TitleFontSize = IsMobile and 14 or 16
+
+local CustomGui = Instance.new("ScreenGui")
+CustomGui.Name = "RecorderHub"
+CustomGui.ResetOnSpawn = false
+CustomGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+CustomGui.Parent = PlayerGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, GuiWidth, 0, GuiHeight)
+MainFrame.Position = UDim2.new(0.5, -GuiWidth / 2, 0.5, -GuiHeight / 2)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = CustomGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(45, 45, 55)
+MainStroke.Thickness = 1
+MainStroke.Parent = MainFrame
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, IsMobile and 42 or 35)
+TitleBar.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
+TitleBar.BorderSizePixel = 0
+TitleBar.Active = true
+TitleBar.Parent = MainFrame
+
+local TitleBarCorner = Instance.new("UICorner")
+TitleBarCorner.CornerRadius = UDim.new(0, 8)
+TitleBarCorner.Parent = TitleBar
+
+local TitleBarFix = Instance.new("Frame")
+TitleBarFix.Size = UDim2.new(1, 0, 0, 10)
+TitleBarFix.Position = UDim2.new(0, 0, 1, -10)
+TitleBarFix.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
+TitleBarFix.BorderSizePixel = 0
+TitleBarFix.Parent = TitleBar
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Name = "TitleLabel"
+TitleLabel.Size = UDim2.new(1, -50, 1, 0)
+TitleLabel.Position = UDim2.new(0, 10, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+TitleLabel.TextSize = TitleFontSize
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.Text = "Strategy Recorder"
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Parent = TitleBar
+
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Name = "MinimizeButton"
+MinimizeButton.Size = UDim2.new(0, IsMobile and 36 or 28, 0, IsMobile and 36 or 28)
+MinimizeButton.Position = UDim2.new(1, IsMobile and -40 or -32, 0.5, IsMobile and -18 or -14)
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+MinimizeButton.BorderSizePixel = 0
+MinimizeButton.TextColor3 = Color3.fromRGB(180, 180, 180)
+MinimizeButton.TextSize = IsMobile and 18 or 14
+MinimizeButton.Font = Enum.Font.GothamBold
+MinimizeButton.Text = "-"
+MinimizeButton.Parent = TitleBar
+
+local MinBtnCorner = Instance.new("UICorner")
+MinBtnCorner.CornerRadius = UDim.new(0, 4)
+MinBtnCorner.Parent = MinimizeButton
+
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Name = "ContentFrame"
+ContentFrame.Size = UDim2.new(1, 0, 1, -(IsMobile and 42 or 35))
+ContentFrame.Position = UDim2.new(0, 0, 0, IsMobile and 42 or 35)
+ContentFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+ContentFrame.BorderSizePixel = 0
+ContentFrame.ClipsDescendants = true
+ContentFrame.Parent = MainFrame
+
+local Padding = IsMobile and 8 or 5
+
+local LogsPanel = Instance.new("Frame")
+LogsPanel.Name = "LogsPanel"
+LogsPanel.Size = UDim2.new(1, -Padding * 2, 0.6, -Padding)
+LogsPanel.Position = UDim2.new(0, Padding, 0, Padding)
+LogsPanel.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+LogsPanel.BorderSizePixel = 0
+LogsPanel.Parent = ContentFrame
+
+local LogsPanelCorner = Instance.new("UICorner")
+LogsPanelCorner.CornerRadius = UDim.new(0, 6)
+LogsPanelCorner.Parent = LogsPanel
+
+local LogsLabel = Instance.new("TextLabel")
+LogsLabel.Name = "LogsLabel"
+LogsLabel.Size = UDim2.new(1, 0, 0, IsMobile and 24 or 20)
+LogsLabel.BackgroundColor3 = Color3.fromRGB(10, 10, 14)
+LogsLabel.BorderSizePixel = 0
+LogsLabel.TextColor3 = Color3.fromRGB(120, 120, 120)
+LogsLabel.TextSize = IsMobile and 12 or 11
+LogsLabel.Font = Enum.Font.GothamBold
+LogsLabel.Text = "ACTIONS LOG"
+LogsLabel.Parent = LogsPanel
+
+local LogsLabelCorner = Instance.new("UICorner")
+LogsLabelCorner.CornerRadius = UDim.new(0, 6)
+LogsLabelCorner.Parent = LogsLabel
+
+local LogsScrollingFrame = Instance.new("ScrollingFrame")
+LogsScrollingFrame.Name = "LogsScrollingFrame"
+LogsScrollingFrame.Size = UDim2.new(1, -8, 1, -(IsMobile and 32 or 28))
+LogsScrollingFrame.Position = UDim2.new(0, 4, 0, IsMobile and 28 or 24)
+LogsScrollingFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+LogsScrollingFrame.BorderSizePixel = 0
+LogsScrollingFrame.ScrollBarThickness = IsMobile and 6 or 4
+LogsScrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(50, 50, 60)
+LogsScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+LogsScrollingFrame.Parent = LogsPanel
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Name = "UIListLayout"
+UIListLayout.Padding = UDim.new(0, 1)
+UIListLayout.Parent = LogsScrollingFrame
+
+local function AddLog(text)
+    local LogEntry = Instance.new("TextLabel")
+    LogEntry.Name = "LogEntry"
+    LogEntry.Size = UDim2.new(1, 0, 0, IsMobile and 22 or 18)
+    LogEntry.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    LogEntry.BorderSizePixel = 0
+    LogEntry.TextColor3 = Color3.fromRGB(140, 140, 140)
+    LogEntry.TextSize = LogFontSize
+    LogEntry.Font = Enum.Font.Gotham
+    LogEntry.Text = "  " .. text
+    LogEntry.TextXAlignment = Enum.TextXAlignment.Left
+    LogEntry.TextTruncate = Enum.TextTruncate.AtEnd
+    LogEntry.Parent = LogsScrollingFrame
+
+    local EntryCorner = Instance.new("UICorner")
+    EntryCorner.CornerRadius = UDim.new(0, 3)
+    EntryCorner.Parent = LogEntry
+
+    LogsScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y)
+    LogsScrollingFrame.CanvasPosition = Vector2.new(0, LogsScrollingFrame.CanvasSize.Y.Offset)
+end
+
+local ControlsFrame = Instance.new("Frame")
+ControlsFrame.Name = "ControlsFrame"
+ControlsFrame.Size = UDim2.new(1, -Padding * 2, 0.4, -Padding * 2)
+ControlsFrame.Position = UDim2.new(0, Padding, 0.6, Padding)
+ControlsFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+ControlsFrame.BorderSizePixel = 0
+ControlsFrame.Parent = ContentFrame
+
+local RecordButton = Instance.new("TextButton")
+RecordButton.Name = "RecordButton"
+RecordButton.Size = UDim2.new(0.5, -3, 0, ButtonHeight)
+RecordButton.Position = UDim2.new(0, 0, 0, 0)
+RecordButton.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+RecordButton.BorderSizePixel = 0
+RecordButton.TextColor3 = Color3.fromRGB(170, 170, 170)
+RecordButton.TextSize = IsMobile and 13 or 11
+RecordButton.Font = Enum.Font.GothamBold
+RecordButton.Text = "Record OFF"
+RecordButton.Parent = ControlsFrame
+
+local RecordCorner = Instance.new("UICorner")
+RecordCorner.CornerRadius = UDim.new(0, 6)
+RecordCorner.Parent = RecordButton
+
+local CopyButton = Instance.new("TextButton")
+CopyButton.Name = "CopyButton"
+CopyButton.Size = UDim2.new(0.5, -3, 0, ButtonHeight)
+CopyButton.Position = UDim2.new(0.5, 3, 0, 0)
+CopyButton.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+CopyButton.BorderSizePixel = 0
+CopyButton.TextColor3 = Color3.fromRGB(170, 170, 170)
+CopyButton.TextSize = IsMobile and 13 or 11
+CopyButton.Font = Enum.Font.GothamBold
+CopyButton.Text = "Copy Code"
+CopyButton.Parent = ControlsFrame
+
+local CopyCorner = Instance.new("UICorner")
+CopyCorner.CornerRadius = UDim.new(0, 6)
+CopyCorner.Parent = CopyButton
+
+local SettingsFrame = Instance.new("Frame")
+SettingsFrame.Name = "SettingsFrame"
+SettingsFrame.Size = UDim2.new(1, 0, 1, -(ButtonHeight + 10))
+SettingsFrame.Position = UDim2.new(0, 0, 0, ButtonHeight + 10)
+SettingsFrame.BackgroundTransparency = 1
+SettingsFrame.Parent = ControlsFrame
+
+local function CreateToggle(parent, name, defaultValue, callback, yPos)
+    local ToggleFrame = Instance.new("Frame")
+    ToggleFrame.Name = name .. "Frame"
+    ToggleFrame.Size = UDim2.new(1, 0, 0, IsMobile and 32 or 22)
+    ToggleFrame.Position = UDim2.new(0, 0, 0, yPos)
+    ToggleFrame.BackgroundTransparency = 1
+    ToggleFrame.Parent = parent
+
+    local ToggleSize = IsMobile and 20 or 12
+
+    local ToggleButton = Instance.new("TextButton")
+    ToggleButton.Name = name .. "Toggle"
+    ToggleButton.Size = UDim2.new(0, ToggleSize, 0, ToggleSize)
+    ToggleButton.Position = UDim2.new(0, 0, 0.5, -ToggleSize / 2)
+    ToggleButton.BackgroundColor3 = defaultValue and Color3.fromRGB(80, 180, 80) or Color3.fromRGB(50, 50, 60)
+    ToggleButton.BorderSizePixel = 0
+    ToggleButton.Text = ""
+    ToggleButton.Parent = ToggleFrame
+
+    local ToggleBtnCorner = Instance.new("UICorner")
+    ToggleBtnCorner.CornerRadius = UDim.new(0, 3)
+    ToggleBtnCorner.Parent = ToggleButton
+
+    local ToggleLabel = Instance.new("TextLabel")
+    ToggleLabel.Name = name .. "Label"
+    ToggleLabel.Size = UDim2.new(1, -(ToggleSize + 8), 1, 0)
+    ToggleLabel.Position = UDim2.new(0, ToggleSize + 8, 0, 0)
+    ToggleLabel.BackgroundTransparency = 1
+    ToggleLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
+    ToggleLabel.TextSize = IsMobile and 13 or 10
+    ToggleLabel.Font = Enum.Font.Gotham
+    ToggleLabel.Text = name
+    ToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    ToggleLabel.Parent = ToggleFrame
+
+    local state = defaultValue
+
+    ToggleButton.MouseButton1Click:Connect(function()
+        state = not state
+        TweenService:Create(ToggleButton, TweenInfo.new(0.2), {
+            BackgroundColor3 = state and Color3.fromRGB(80, 180, 80) or Color3.fromRGB(50, 50, 60)
+        }):Play()
+        if callback then
+            callback(state)
+        end
+    end)
+
+    return state
+end
+
+CreateToggle(SettingsFrame, "Auto Retry", Globals.autoRetry, function(v)
+    Globals.autoRetry = v
+    SaveSettings()
+    AddLog("[Setting] Auto Retry: " .. (v and "ON" or "OFF"))
+end, 0)
+
+local function CheckResOk(data)
+    if data == true then return true end
+    if type(data) == "table" and data.Success == true then return true end
+    local success, IsModel = pcall(function()
+        return data and data:IsA("Model")
+    end)
+    if success and IsModel then return true end
+    if type(data) == "userdata" then return true end
+    return false
+end
+
+local function GetCurrentWave()
+    local label = PlayerGui:FindFirstChild("ReactGameTopGameDisplay", true)
+    if label then
+        local ok, val = pcall(function()
+            return label.Frame.wave.container:FindFirstChild("value")
+        end)
+        if ok and val then
+            local WaveNum = val.Text:match("(%d+)")
+            return tonumber(WaveNum) or 0
+        end
+    end
+    return 0
+end
+
+local OldInvoke = RemoteFunc.InvokeServer
+
+RemoteFunc.InvokeServer = function(self, ...)
+    local args = {...}
+    local result = OldInvoke(self, ...)
+
+    if RecordingMode then
+        if args[1] == "Troops" and args[2] == "Place" then
+            local data = args[3]
+            local towerName = args[4]
+            if data and towerName and CheckResOk(result) then
+                local pos = data.Position
+                task.defer(function()
+                    local NewT = nil
+                    local startTime = tick()
+                    local existing = {}
+                    for _, child in ipairs(workspace.Towers:GetChildren()) do
+                        existing[child] = true
+                    end
+                    while not NewT and (tick() - startTime) < 5 do
+                        for _, child in ipairs(workspace.Towers:GetChildren()) do
+                            if not existing[child] then
+                                for _, SubChild in ipairs(child:GetChildren()) do
+                                    if SubChild.Name == "Owner" and SubChild.Value == LocalPlayer.UserId then
+                                        NewT = child
+                                        break
+                                    end
+                                end
+                            end
+                            if NewT then break end
+                        end
+                        if not NewT then task.wait(0.05) end
+                    end
+                    if NewT then
+                        table.insert(PlacedTowers, NewT)
+                        local idx = #PlacedTowers
+                        table.insert(RecordedActions, {
+                            type = "place",
+                            index = idx,
+                            name = towerName,
+                            x = pos.X,
+                            y = pos.Y,
+                            z = pos.Z
+                        })
+                        AddLog("[Rec] Place: " .. towerName .. " #" .. idx)
+                    end
+                end)
+            end
+        elseif args[1] == "Troops" and args[2] == "Upgrade" then
+            local data = args[4]
+            if data and data.Troop then
+                for i, t in ipairs(PlacedTowers) do
+                    if t == data.Troop then
+                        table.insert(RecordedActions, {
+                            type = "upgrade",
+                            index = i,
+                            path = data.Path or 1
+                        })
+                        AddLog("[Rec] Upgrade tower #" .. i)
+                        break
+                    end
+                end
+            end
+        elseif args[1] == "Troops" and args[2] == "Sell" then
+            local data = args[3]
+            if data and data.Troop then
+                for i, t in ipairs(PlacedTowers) do
+                    if t == data.Troop then
+                        table.insert(RecordedActions, {
+                            type = "sell",
+                            index = i
+                        })
+                        AddLog("[Rec] Sell tower #" .. i)
+                        table.remove(PlacedTowers, i)
+                        break
+                    end
+                end
+            end
+        elseif args[1] == "Troops" and args[2] == "Target" then
+            local data = args[4]
+            if data and data.Troop then
+                for i, t in ipairs(PlacedTowers) do
+                    if t == data.Troop then
+                        table.insert(RecordedActions, {
+                            type = "target",
+                            index = i,
+                            target = data.Target
+                        })
+                        AddLog("[Rec] Target tower #" .. i .. " -> " .. tostring(data.Target))
+                        break
+                    end
+                end
+            end
+        elseif args[1] == "Troops" and args[2] == "Abilities" then
+            local data = args[4]
+            if data and data.Troop then
+                for i, t in ipairs(PlacedTowers) do
+                    if t == data.Troop then
+                        table.insert(RecordedActions, {
+                            type = "ability",
+                            index = i,
+                            name = data.Name
+                        })
+                        AddLog("[Rec] Ability on tower #" .. i .. " -> " .. tostring(data.Name))
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    return result
+end
+
+local function PlaceTower(TName, px, py, pz)
+    if GameState ~= "GAME" then return false end
+
+    AddLog("[Place] Placing: " .. TName)
+
+    local existing = {}
+    for _, child in ipairs(workspace.Towers:GetChildren()) do
+        existing[child] = true
+    end
+
+    local success = false
+    local attempts = 0
+    while not success and attempts < 20 do
+        local ok, res = pcall(function()
+            return OldInvoke(RemoteFunc, "Troops", "Place", {
+                Rotation = CFrame.new(),
+                Position = Vector3.new(px, py, pz)
+            }, TName)
+        end)
+
+        if ok and CheckResOk(res) then
+            success = true
+            break
+        end
+        attempts = attempts + 1
+        task.wait(0.15)
+    end
+
+    if success then
+        local NewT = nil
+        local startTime = tick()
+        while not NewT and (tick() - startTime) < 5 do
+            for _, child in ipairs(workspace.Towers:GetChildren()) do
+                if not existing[child] then
+                    for _, SubChild in ipairs(child:GetChildren()) do
+                        if SubChild.Name == "Owner" and SubChild.Value == LocalPlayer.UserId then
+                            NewT = child
+                            break
+                        end
+                    end
+                end
+                if NewT then break end
+            end
+            if not NewT then task.wait(0.05) end
+        end
+
+        if NewT then
+            table.insert(PlacedTowers, NewT)
+            AddLog("[OK] Tower placed at index " .. #PlacedTowers)
+            return #PlacedTowers
+        end
+    end
+
+    AddLog("[X] Failed to place tower")
+    return false
+end
+
+local function UpgradeTower(idx, PathId)
+    if GameState ~= "GAME" then return false end
+    if not PlacedTowers[idx] then
+        AddLog("[X] Tower index " .. idx .. " not found")
+        return false
+    end
+
+    local t = PlacedTowers[idx]
+    AddLog("[Upgrade] Tower " .. idx)
+
+    local success = false
+    local attempts = 0
+    while not success and attempts < 20 do
+        local ok, res = pcall(function()
+            return OldInvoke(RemoteFunc, "Troops", "Upgrade", "Set", {
+                Troop = t,
+                Path = PathId or 1
+            })
+        end)
+        if ok and CheckResOk(res) then
+            success = true
+            break
+        end
+        attempts = attempts + 1
+        task.wait(0.15)
+    end
+
+    if success then
+        AddLog("[OK] Tower " .. idx .. " upgraded")
+    else
+        AddLog("[X] Failed to upgrade")
+    end
+
+    return success
+end
+
+local function SellTower(idx)
+    if GameState ~= "GAME" then return false end
+    if not PlacedTowers[idx] then
+        AddLog("[X] Tower index " .. idx .. " not found")
+        return false
+    end
+
+    local t = PlacedTowers[idx]
+    AddLog("[Sell] Tower " .. idx)
+
+    local success = false
+    local attempts = 0
+    while not success and attempts < 20 do
+        local ok, res = pcall(function()
+            return OldInvoke(RemoteFunc, "Troops", "Sell", { Troop = t })
+        end)
+        if ok and CheckResOk(res) then
+            success = true
+            break
+        end
+        attempts = attempts + 1
+        task.wait(0.15)
+    end
+
+    if success then
+        table.remove(PlacedTowers, idx)
+        AddLog("[OK] Tower " .. idx .. " sold")
+    else
+        AddLog("[X] Failed to sell")
+    end
+
+    return success
+end
+
+local function SetTarget(idx, TargetType)
+    if GameState ~= "GAME" then return false end
+    if not PlacedTowers[idx] then return false end
+
+    local t = PlacedTowers[idx]
+    pcall(function()
+        OldInvoke(RemoteFunc, "Troops", "Target", "Set", {
+            Troop = t,
+            Target = TargetType
+        })
+        AddLog("[Target] Tower " .. idx .. " -> " .. TargetType)
+    end)
+
+    return true
+end
+
+local function ActivateAbility(idx, abilityName)
+    if GameState ~= "GAME" then return false end
+    if not PlacedTowers[idx] then return false end
+
+    local t = PlacedTowers[idx]
+    pcall(function()
+        OldInvoke(RemoteFunc, "Troops", "Abilities", "Activate", {
+            Troop = t,
+            Name = abilityName,
+            Data = {}
+        })
+        AddLog("[Ability] " .. abilityName .. " on tower " .. idx)
+    end)
+
+    return true
+end
+
+local function RunVoteSkip()
+    local success = false
+    local attempts = 0
+    while not success and attempts < 10 do
+        local ok = pcall(function()
+            OldInvoke(RemoteFunc, "Voting", "Skip")
+        end)
+        if ok then
+            success = true
+            break
+        end
+        attempts = attempts + 1
+        task.wait(0.2)
+    end
+    return success
+end
+
+local function WaitForMatchEnd()
+    local lastWave = GetCurrentWave()
+    task.wait(2)
+
+    while true do
+        local currentWave = GetCurrentWave()
+        if currentWave ~= lastWave then
+            lastWave = currentWave
+            task.wait(2)
+        end
+
+        local rewardsGui = PlayerGui:FindFirstChild("ReactGameNewRewards")
+        if rewardsGui then
+            local ok, found = pcall(function()
+                return rewardsGui.Frame.gameOver.RewardsScreen
+            end)
+            if ok and found then
+                AddLog("[Match] Match ended!")
+                task.wait(Globals.retryDelay or 2)
+                RunVoteSkip()
+                return true
+            end
+        end
+
+        task.wait(0.5)
+    end
+end
+
+local IsMinimized = false
+
+MinimizeButton.MouseButton1Click:Connect(function()
+    IsMinimized = not IsMinimized
+    if IsMinimized then
+        ContentFrame.Visible = false
+        TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+            Size = UDim2.new(0, GuiWidth, 0, IsMobile and 42 or 35)
+        }):Play()
+        MinimizeButton.Text = "+"
+    else
+        ContentFrame.Visible = true
+        TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+            Size = UDim2.new(0, GuiWidth, 0, GuiHeight)
+        }):Play()
+        MinimizeButton.Text = "-"
+    end
+end)
+
+RecordButton.MouseButton1Click:Connect(function()
+    RecordingMode = not RecordingMode
+    TweenService:Create(RecordButton, TweenInfo.new(0.2), {
+        BackgroundColor3 = RecordingMode and Color3.fromRGB(200, 60, 60) or Color3.fromRGB(40, 40, 50)
+    }):Play()
+    RecordButton.Text = RecordingMode and "Recording..." or "Record OFF"
+
+    if RecordingMode then
+        PlacedTowers = {}
+        RecordedActions = {}
+        AddLog("[Record] Started - place towers in game!")
+    else
+        AddLog("[Record] Stopped - " .. #RecordedActions .. " actions recorded")
+    end
+end)
+
+CopyButton.MouseButton1Click:Connect(function()
+    if #RecordedActions == 0 then
+        AddLog("[Copy] No actions recorded!")
+        return
+    end
+
+    local indexMap = {}
+    local code = "local TDS = loadstring(game:HttpGet('https://raw.githubusercontent.com/Vodi4kasy1/scripts/refs/heads/main/3333332'))()\n\n"
+    code = code .. "task.wait(2)\n\n"
+
+    local placeCounter = 0
+
+    for _, action in ipairs(RecordedActions) do
+        if action.type == "place" then
+            placeCounter = placeCounter + 1
+            indexMap[action.index] = placeCounter
+            code = code .. string.format("local idx%d = TDS:Place('%s', %.4f, %.4f, %.4f)\n", placeCounter, action.name, action.x, action.y, action.z)
+        elseif action.type == "upgrade" then
+            local mapped = indexMap[action.index]
+            if mapped then
+                code = code .. string.format("TDS:Upgrade(idx%d, %d)\n", mapped, action.path or 1)
+            end
+        elseif action.type == "sell" then
+            local mapped = indexMap[action.index]
+            if mapped then
+                code = code .. string.format("TDS:Sell(idx%d)\n", mapped)
+            end
+        elseif action.type == "target" then
+            local mapped = indexMap[action.index]
+            if mapped then
+                code = code .. string.format("TDS:SetTarget(idx%d, '%s')\n", mapped, tostring(action.target))
+            end
+        elseif action.type == "ability" then
+            local mapped = indexMap[action.index]
+            if mapped then
+                code = code .. string.format("TDS:Ability(idx%d, '%s')\n", mapped, tostring(action.name))
+            end
+        end
+    end
+
+    code = code .. "\nTDS:WaitForMatchEnd()\n"
+
+    setclipboard(code)
+    AddLog("[OK] Code copied! " .. #RecordedActions .. " actions")
+
+    local origColor = CopyButton.BackgroundColor3
+    TweenService:Create(CopyButton, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(60, 160, 80)}):Play()
+    task.delay(0.6, function()
+        TweenService:Create(CopyButton, TweenInfo.new(0.15), {BackgroundColor3 = origColor}):Play()
+    end)
+end)
+
+local function MakeDraggable(frame, dragArea)
+    local dragging = false
+    local dragStartPos = nil
+    local frameStartPos = nil
+
+    dragArea.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStartPos = input.Position
+            frameStartPos = frame.Position
+        end
+    end)
+
+    dragArea.InputChanged:Connect(function(input)
+        if dragging then
+            if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                local delta = input.Position - dragStartPos
+                frame.Position = UDim2.new(
+                    frameStartPos.X.Scale,
+                    frameStartPos.X.Offset + delta.X,
+                    frameStartPos.Y.Scale,
+                    frameStartPos.Y.Offset + delta.Y
+                )
+            end
+        end
+    end)
+
+    dragArea.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+MakeDraggable(MainFrame, TitleBar)
+
+if IsMobile then
+    local ToggleBtn = Instance.new("TextButton")
+    ToggleBtn.Name = "MobileToggle"
+    ToggleBtn.Size = UDim2.new(0, 52, 0, 52)
+    ToggleBtn.Position = UDim2.new(0, 10, 0.5, -26)
+    ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    ToggleBtn.BorderSizePixel = 0
+    ToggleBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+    ToggleBtn.TextSize = 20
+    ToggleBtn.Font = Enum.Font.GothamBold
+    ToggleBtn.Text = "R"
+    ToggleBtn.ZIndex = 10
+    ToggleBtn.Parent = CustomGui
+
+    local TBCorner = Instance.new("UICorner")
+    TBCorner.CornerRadius = UDim.new(0, 26)
+    TBCorner.Parent = ToggleBtn
+
+    local TBStroke = Instance.new("UIStroke")
+    TBStroke.Color = Color3.fromRGB(60, 60, 80)
+    TBStroke.Thickness = 2
+    TBStroke.Parent = ToggleBtn
+
+    local tbDragging = false
+    local tbDragStart = nil
+    local tbFrameStart = nil
+    local tbMoved = false
+
+    ToggleBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch then
+            tbDragging = true
+            tbMoved = false
+            tbDragStart = input.Position
+            tbFrameStart = ToggleBtn.Position
+        end
+    end)
+
+    ToggleBtn.InputChanged:Connect(function(input)
+        if tbDragging and input.UserInputType == Enum.UserInputType.Touch then
+            local delta = input.Position - tbDragStart
+            if delta.Magnitude > 6 then
+                tbMoved = true
+            end
+            ToggleBtn.Position = UDim2.new(
+                tbFrameStart.X.Scale,
+                tbFrameStart.X.Offset + delta.X,
+                tbFrameStart.Y.Scale,
+                tbFrameStart.Y.Offset + delta.Y
+            )
+        end
+    end)
+
+    ToggleBtn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch then
+            tbDragging = false
+            if not tbMoved then
+                MainFrame.Visible = not MainFrame.Visible
+            end
+        end
+    end)
+else
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.LeftControl then
+            MainFrame.Visible = not MainFrame.Visible
+        end
+    end)
+end
+
+_G.TDS = {
+    PlacedTowers = PlacedTowers,
+    Place = function(self, name, x, y, z)
+        return PlaceTower(name, x, y, z)
+    end,
+    Upgrade = function(self, idx, path)
+        return UpgradeTower(idx, path)
+    end,
+    Sell = function(self, idx)
+        return SellTower(idx)
+    end,
+    SetTarget = function(self, idx, target)
+        return SetTarget(idx, target)
+    end,
+    Ability = function(self, idx, name)
+        return ActivateAbility(idx, name)
+    end,
+    WaitForMatchEnd = function(self)
+        return WaitForMatchEnd()
+    end,
+    GetWave = function(self)
+        return GetCurrentWave()
+    end
+}
+
+AddLog("[System] Recorder ready!")
+if IsMobile then
+    AddLog("[Info] Tap R button to show/hide")
+    AddLog("[Info] Drag R button to move it")
+else
+    AddLog("[Hotkey] LeftCtrl to toggle UI")
+end
+AddLog("[Info] Press Record then place towers!")
+
+task.spawn(function()
+    while true do
+        if Globals.autoRetry and GameState == "GAME" then
+            WaitForMatchEnd()
+            PlacedTowers = {}
+        end
+        task.wait(1)
+    end
+end)
